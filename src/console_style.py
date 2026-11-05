@@ -1,42 +1,40 @@
-import os
 import re
-import sys
+from colorama import init, Fore, Back, Style as ColoramaStyle
 
-# Активуємо підтримку ANSI-кольорів у консолі Windows (PowerShell / CMD)
-if os.name == "nt":
-    os.system("")
+# Ініціалізуємо colorama для кросплатформної підтримки кольорів у Windows PowerShell / CMD / Linux
+init(autoreset=False)
 
 
 class Style:
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
+    RESET = ColoramaStyle.RESET_ALL
+    BOLD = ColoramaStyle.BRIGHT
+    DIM = ColoramaStyle.DIM
     ITALIC = "\033[3m"
     UNDERLINE = "\033[4m"
 
-    # Основні кольори
-    RED = "\033[91m"
-    GREEN = "\033[92m"
-    YELLOW = "\033[93m"
-    BLUE = "\033[94m"
-    MAGENTA = "\033[95m"
-    CYAN = "\033[96m"
-    WHITE = "\033[97m"
-    GRAY = "\033[90m"
+    # Основні кольори через colorama.Fore
+    RED = Fore.LIGHTRED_EX
+    GREEN = Fore.LIGHTGREEN_EX
+    YELLOW = Fore.LIGHTYELLOW_EX
+    BLUE = Fore.LIGHTBLUE_EX
+    MAGENTA = Fore.LIGHTMAGENTA_EX
+    CYAN = Fore.LIGHTCYAN_EX
+    WHITE = Fore.LIGHTWHITE_EX
+    GRAY = Fore.LIGHTBLACK_EX
 
-    # Фонові бейджі
-    BG_BLUE = "\033[44;97;1m"
-    BG_GREEN = "\033[42;97;1m"
-    BG_RED = "\033[41;97;1m"
-    BG_YELLOW = "\033[43;30;1m"
-    BG_MAGENTA = "\033[45;97;1m"
-    BG_CYAN = "\033[46;30;1m"
+    # Фонові бейджі через colorama.Back + Fore + Style
+    BG_BLUE = Back.BLUE + Fore.LIGHTWHITE_EX + ColoramaStyle.BRIGHT
+    BG_GREEN = Back.GREEN + Fore.LIGHTWHITE_EX + ColoramaStyle.BRIGHT
+    BG_RED = Back.RED + Fore.LIGHTWHITE_EX + ColoramaStyle.BRIGHT
+    BG_YELLOW = Back.YELLOW + Fore.BLACK + ColoramaStyle.BRIGHT
+    BG_MAGENTA = Back.MAGENTA + Fore.LIGHTWHITE_EX + ColoramaStyle.BRIGHT
+    BG_CYAN = Back.CYAN + Fore.BLACK + ColoramaStyle.BRIGHT
 
 
 def colorize_react_block(raw_block: str) -> str:
     """
     Перетворює текстовий блок ReAct Trace (Thought / Validation / Action / Observation / Final Answer)
-    у кольоровий, зручний для читання консольний вивід із жирними мітками та підсвіткою.
+    у кольоровий, зручний для читання консольний вивід за допомогою бібліотеки colorama.
     """
     lines = raw_block.splitlines()
     styled_lines = []
@@ -50,7 +48,6 @@ def colorize_react_block(raw_block: str) -> str:
         # 1. Thought
         if stripped.startswith("Thought:"):
             content = stripped[len("Thought:"):].strip()
-            # Підсвічуємо назви моделей
             content = re.sub(
                 r"(gemini-3\.5-flash-lite|openai/gpt-4o-mini|deepseek-v4-flash-0731)",
                 f"{Style.BOLD}{Style.MAGENTA}\\1{Style.RESET}{Style.CYAN}",
@@ -81,7 +78,6 @@ def colorize_react_block(raw_block: str) -> str:
         # 4. Action
         elif stripped.startswith("Action:"):
             content = stripped[len("Action:"):].strip()
-            # Виділяємо ім'я інструменту жирним пурпуровим кольором
             content = re.sub(
                 r"^([a-zA-Z0-9_]+)\(",
                 f"{Style.BOLD}{Style.MAGENTA}\\1{Style.RESET}{Style.YELLOW}(",
@@ -129,7 +125,6 @@ def colorize_react_block(raw_block: str) -> str:
         elif stripped.startswith('"') and stripped.endswith('"'):
             styled_lines.append(f"   {Style.ITALIC}{Style.WHITE}{stripped}{Style.RESET}")
         else:
-            # Додаткова підсвітка статусів у звичайних рядках
             colored_line = line
             colored_line = colored_line.replace("FAILED", f"{Style.BOLD}{Style.RED}FAILED{Style.RESET}")
             colored_line = colored_line.replace("PASSED", f"{Style.BOLD}{Style.GREEN}PASSED{Style.RESET}")
