@@ -217,3 +217,4 @@ def log_inspection_result(
         tokens_completion=tokens_completion,
         estimated_cost_usd=estimated_cost_usd,
     )
+

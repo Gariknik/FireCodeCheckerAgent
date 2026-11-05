@@ -1,4 +1,5 @@
 import os
+import sys
 import logging
 from dotenv import load_dotenv
 from telegram import Update
@@ -8,7 +9,16 @@ from src.agent import FireCodeCheckerAgent
 from src.database import init_db, fetch_recent_logs, fetch_db_summary_stats, format_logs_for_console
 
 load_dotenv()
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+# Налаштування UTF-8 для консолі Windows
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+# Вимикаємо службовий шум httpx/telegram, щоб під час запиту в консоль виводився тільки ReAct Trace
+logging.basicConfig(level=logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
 
 agent = FireCodeCheckerAgent()
 
@@ -33,7 +43,7 @@ async def logs_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     logs = fetch_recent_logs(limit=5, chat_id_filter=update.message.chat_id)
     stats = fetch_db_summary_stats()
-    print(format_logs_for_console(logs, stats=stats))
+    print(format_logs_for_console(logs, stats=stats), flush=True)
 
     if not logs:
         await update.message.reply_text("📭 У базі даних ще немає записів для цього чату.")
@@ -56,20 +66,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     chat_id = update.message.chat_id
     user_text = update.message.text
 
-    logging.info("Отримано повідомлення від chat_id=%s: %s", chat_id, user_text)
-    result = agent.run_react_inspection(chat_id=chat_id, message_text=user_text)
+    # Під час запиту в консоль у реальному часі виводиться тільки ReAct Trace (print_trace=True)
+    result = agent.run_react_inspection(
+        chat_id=chat_id,
+        message_text=user_text,
+        print_trace=True,
+    )
     if not result["success"]:
-        logging.warning("Помилка валідації для chat_id=%s", chat_id)
         await update.message.reply_text(result["error"])
         return
-
-    logging.info(
-        "Аудит завершено: log_id=%s, room=%s, status=%s, defects=%s",
-        result["db_log"].get("log_id"),
-        result["report"]["room_name"],
-        result["report"]["status"],
-        result["report"]["defects_count"],
-    )
 
     # Інструмент send_telegram_report вже відправляє повідомлення через Telegram API.
     # Відправляємо через reply_text лише якщо інструмент не доставив його напряму.
@@ -98,7 +103,6 @@ def run_telegram_bot() -> None:
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("logs", logs_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    logging.info("FireCodeCheckerAgent Telegram Bot запущено...")
     app.run_polling()
 
 

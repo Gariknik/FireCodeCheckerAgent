@@ -198,3 +198,4 @@ def format_logs_for_console(
 
     lines.append("=" * 110)
     return "\n".join(lines)
+

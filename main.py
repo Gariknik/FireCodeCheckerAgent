@@ -100,7 +100,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--bot",
         action="store_true",
-        help="Запустити Telegram-бота у режимі polling",
+        help="Запустити Telegram-бота у режимі polling (під час запитів виводить у консоль тільки ReAct Trace)",
+    )
+    parser.add_argument(
+        "--query",
+        type=str,
+        default=None,
+        help="Виконати перевірку одного запиту і вивести у консоль тільки ReAct Trace",
     )
     parser.add_argument(
         "--logs",
@@ -138,6 +144,14 @@ if __name__ == "__main__":
     if args.bot:
         from src.bot import run_telegram_bot
         run_telegram_bot()
+    elif args.query:
+        os.environ["TELEGRAM_BOT_TOKEN"] = "YOUR_BOT_TOKEN"
+        init_db()
+        FireCodeCheckerAgent().run_react_inspection(
+            chat_id=987654321,
+            message_text=args.query,
+            print_trace=True,
+        )
     elif args.logs:
         show_logs_in_console(
             limit=args.limit,

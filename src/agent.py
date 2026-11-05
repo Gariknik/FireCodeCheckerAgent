@@ -383,10 +383,15 @@ class FireCodeCheckerAgent:
         )
         return report, 480, 145
 
-    def run_react_inspection(self, chat_id: int, message_text: str) -> Dict[str, Any]:
+    def run_react_inspection(
+        self,
+        chat_id: int,
+        message_text: str,
+        print_trace: bool = False,
+    ) -> Dict[str, Any]:
         """
         Виконує повний ReAct-цикл перевірки приміщення за Telegram-повідомленням.
-        Повертає деталізований результат, трасування ReAct, звіт та ID запису в SQLite.
+        Якщо print_trace=True, у реальному часі виводить у консоль виключно ReAct Trace.
         """
         trace_lines: List[str] = []
         iterations = 0
@@ -394,7 +399,12 @@ class FireCodeCheckerAgent:
         tokens_completion_total = 0
         estimated_cost_usd = 0.0
 
-        trace_lines.append(
+        def _emit(line: str) -> None:
+            trace_lines.append(line)
+            if print_trace:
+                print(line, flush=True)
+
+        _emit(
             f'Thought: Отримано вхідне Telegram-повідомлення (chat_id: {chat_id}):\n"{message_text}"\n'
             f"Парсю вхідні дані через BuildingRoomInput (Pydantic) за допомогою {MODEL_EXTRACTOR}."
         )
@@ -404,9 +414,9 @@ class FireCodeCheckerAgent:
             room_input, tp, tc = self.extract_room_input(message_text)
             tokens_prompt_total += tp
             tokens_completion_total += tc
-            trace_lines.append(f"Validation: {room_input!r} -> VALID.\n")
+            _emit(f"Validation: {room_input!r} -> VALID.\n")
         except (ValidationError, ValueError) as exc:
-            trace_lines.append(f"Validation Error: {exc}")
+            _emit(f"Validation Error: {exc}\n")
             return {
                 "success": False,
                 "error": VALIDATION_ERROR_TEMPLATE,
@@ -422,23 +432,23 @@ class FireCodeCheckerAgent:
             iterations += 1
             cat_query = room_input.category or "В"
             q1 = f"ДБН В.1.1-7:2016 макс відстань евакуаційного шляху категорія {cat_query}"
-            trace_lines.append(
+            _emit(
                 f"Thought: Шукаю нормативні вимоги евакуаційної відстані для категорії {cat_query} у відкритих джерелах.\n"
                 f'Action: search_fire_code_web(query="{q1}")'
             )
             obs1 = search_fire_code_web(query=q1)
-            trace_lines.append(f"Observation: {json.dumps(obs1, ensure_ascii=False)}\n")
+            _emit(f"Observation: {json.dumps(obs1, ensure_ascii=False)}\n")
             tokens_prompt_total += 160
 
             if not obs1 and iterations < MAX_ITERATIONS:
                 iterations += 1
                 q2 = f"ДБН В.1.1-7:2016 гранична відстань евакуації категорія {cat_query}"
-                trace_lines.append(
+                _emit(
                     "Thought: Перший запит повернув 0 записів. Перефразовую запит на більш точний за термінологією ДБН.\n"
                     f'Action: search_fire_code_web(query="{q2}")'
                 )
                 obs2 = search_fire_code_web(query=q2)
-                trace_lines.append(f"Observation: {json.dumps(obs2, ensure_ascii=False, indent=2)}\n")
+                _emit(f"Observation: {json.dumps(obs2, ensure_ascii=False, indent=2)}\n")
                 retrieved_rules.extend(obs2)
                 tokens_prompt_total += 200
 
@@ -446,12 +456,12 @@ class FireCodeCheckerAgent:
         if room_input.wall_finish is not None and iterations < MAX_ITERATIONS:
             iterations += 1
             q_wall = "ДБН В.1.1-7:2016 оздоблення стін шляхів евакуації"
-            trace_lines.append(
+            _emit(
                 f"Thought: Шукаю норми оздоблення стін ({room_input.wall_finish}).\n"
                 f'Action: search_fire_code_web(query="{q_wall}")'
             )
             obs_wall = search_fire_code_web(query=q_wall)
-            trace_lines.append(f"Observation: {json.dumps(obs_wall, ensure_ascii=False, indent=2)}\n")
+            _emit(f"Observation: {json.dumps(obs_wall, ensure_ascii=False, indent=2)}\n")
             retrieved_rules.extend(obs_wall)
             tokens_prompt_total += 180
 
@@ -469,12 +479,12 @@ class FireCodeCheckerAgent:
         ) and iterations < MAX_ITERATIONS:
             iterations += 1
             q_doors = "ДБН В.1.1-7:2016 кількість людей ширина дверей висота дверей напрямок відчинення кількість виходів висота приміщення"
-            trace_lines.append(
+            _emit(
                 "Thought: Шукаю нормативні вимоги щодо кількості людей у приміщенні, евакуаційних дверей, кількості виходів та висоти приміщення.\n"
                 f'Action: search_fire_code_web(query="{q_doors}")'
             )
             obs_doors = search_fire_code_web(query=q_doors)
-            trace_lines.append(f"Observation: {json.dumps(obs_doors, ensure_ascii=False, indent=2)}\n")
+            _emit(f"Observation: {json.dumps(obs_doors, ensure_ascii=False, indent=2)}\n")
             retrieved_rules.extend(obs_doors)
             tokens_prompt_total += 180
 
@@ -490,7 +500,7 @@ class FireCodeCheckerAgent:
         if estimated_cost_usd > MAX_BUDGET_USD:
             raise RuntimeError(f"Перевищено максимальний бюджет перевірки ({MAX_BUDGET_USD} USD)")
 
-        trace_lines.append(
+        _emit(
             f"Thought: Зіставляю параметри за допомогою {MODEL_ANALYTICAL}:\n"
             f"Статус: {report.status}, кількість дефектів: {report.defects_count}.\n"
             f"Генерую об'єкт FireSafetyReportOutput та надсилаю звіт користувачу в Telegram."
@@ -499,17 +509,17 @@ class FireCodeCheckerAgent:
         # Крок 4: Відправка звіту в Telegram
         iterations += 1
         report_payload = report.model_dump()
-        trace_lines.append(
+        _emit(
             f"Action: send_telegram_report(chat_id={chat_id}, report_payload={json.dumps(report_payload, ensure_ascii=False)})"
         )
         tg_result = send_telegram_report(chat_id=chat_id, report_payload=report_payload)
-        trace_lines.append(
+        _emit(
             f'Observation: {{"status": "{tg_result["status"]}", "message_id": {tg_result.get("message_id")}}}\n'
         )
 
         # Крок 5: Логування у SQLite (inspection_logs)
         iterations += 1
-        trace_lines.append("Thought: Логую результат перевірки, кількість токенів та вартість у SQLite.")
+        _emit("Thought: Логую результат перевірки, кількість токенів та вартість у SQLite.")
         log_res = log_inspection_result(
             chat_id=chat_id,
             room_name=room.room_name if (room := room_input) else report.room_name,
@@ -521,7 +531,7 @@ class FireCodeCheckerAgent:
             tokens_completion=tokens_completion_total,
             estimated_cost_usd=estimated_cost_usd,
         )
-        trace_lines.append(
+        _emit(
             f"Action: log_inspection_result(chat_id={chat_id}, room_name={report.room_name!r}, "
             f"status={report.status!r}, defects_count={report.defects_count}, "
             f"tokens_prompt={tokens_prompt_total}, tokens_completion={tokens_completion_total}, "
@@ -535,7 +545,7 @@ class FireCodeCheckerAgent:
             f"Звіт надіслано в Telegram строго за Pydantic-шаблоном, а лог аудиту та витрати токенів "
             f"збережено у БД SQLite (Log ID: {log_res.get('log_id')})."
         )
-        trace_lines.append(f"Thought: Перевірку завершено.\nFinal Answer: {final_answer}")
+        _emit(f"Thought: Перевірку завершено.\nFinal Answer: {final_answer}\n")
 
         return {
             "success": True,
@@ -553,3 +563,4 @@ class FireCodeCheckerAgent:
             },
             "react_trace": "\n".join(trace_lines),
         }
+

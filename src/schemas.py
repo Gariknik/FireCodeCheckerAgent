@@ -77,3 +77,4 @@ class FireSafetyReportOutput(BaseModel):
                 f"🔗 Перевірені джерела:\n"
                 f"{sources_block}"
             )
+
