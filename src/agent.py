@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from src.schemas import BuildingRoomInput, DefectItem, FireSafetyReportOutput
 from src.tools import search_fire_code_web, send_telegram_report, log_inspection_result
+from src.console_style import Style, colorize_react_block
 
 load_dotenv()
 
@@ -402,7 +403,17 @@ class FireCodeCheckerAgent:
         def _emit(line: str) -> None:
             trace_lines.append(line)
             if print_trace:
-                print(line, flush=True)
+                print(colorize_react_block(line), flush=True)
+
+        if print_trace:
+            header_bar = f"{Style.BOLD}{Style.BLUE}{'═' * 95}{Style.RESET}"
+            print(
+                f"\n{header_bar}\n"
+                f"{Style.BG_BLUE} 🔥 REACT TRACE ЗАПИТУ {Style.RESET} "
+                f"{Style.BOLD}{Style.WHITE}chat_id={chat_id}{Style.RESET}\n"
+                f"{header_bar}",
+                flush=True,
+            )
 
         _emit(
             f'Thought: Отримано вхідне Telegram-повідомлення (chat_id: {chat_id}):\n"{message_text}"\n'

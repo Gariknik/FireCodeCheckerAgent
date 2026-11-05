@@ -4,6 +4,7 @@ import sqlite3
 import time
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
+from src.console_style import Style
 
 load_dotenv()
 
@@ -159,43 +160,55 @@ def format_logs_for_console(
         return json.dumps({"stats": stats, "logs": logs}, ensure_ascii=False, indent=2)
 
     lines: List[str] = []
-    lines.append("=" * 110)
-    lines.append("📊 ЖУРНАЛ ПЕРЕВІРОК З БАЗИ ДАНИХ SQLite (inspection_logs)")
-    lines.append("=" * 110)
+    sep = f"{Style.BOLD}{Style.BLUE}{'=' * 114}{Style.RESET}"
+    sub_sep = f"{Style.GRAY}{'-' * 114}{Style.RESET}"
+    lines.append(sep)
+    lines.append(f"{Style.BOLD}{Style.CYAN}📊 ЖУРНАЛ ПЕРЕВІРОК З БАЗИ ДАНИХ SQLite (inspection_logs){Style.RESET}")
+    lines.append(sep)
 
     if stats:
         lines.append(
-            f"Всього перевірок: {stats.get('total_inspections', 0)} | "
-            f"🟢 PASSED: {stats.get('passed_count') or 0} | "
-            f"🔴 FAILED: {stats.get('failed_count') or 0} | "
-            f"Токенів загалом: {stats.get('total_tokens', 0)} | "
-            f"Витрати: ${stats.get('total_cost_usd', 0.0):.6f}"
+            f"{Style.BOLD}Всього перевірок:{Style.RESET} {Style.BOLD}{Style.WHITE}{stats.get('total_inspections', 0)}{Style.RESET} | "
+            f"{Style.BOLD}{Style.GREEN}🟢 PASSED: {stats.get('passed_count') or 0}{Style.RESET} | "
+            f"{Style.BOLD}{Style.RED}🔴 FAILED: {stats.get('failed_count') or 0}{Style.RESET} | "
+            f"{Style.BOLD}Токенів загалом:{Style.RESET} {Style.CYAN}{stats.get('total_tokens', 0)}{Style.RESET} | "
+            f"{Style.BOLD}Витрати:{Style.RESET} {Style.YELLOW}${stats.get('total_cost_usd', 0.0):.6f}{Style.RESET}"
         )
-        lines.append("-" * 110)
+        lines.append(sub_sep)
 
     if not logs:
-        lines.append("Записів за вказаними критеріями не знайдено.")
+        lines.append(f"{Style.YELLOW}Записів за вказаними критеріями не знайдено.{Style.RESET}")
         return "\n".join(lines)
 
-    header = f"{'ID':<4} | {'Час (UTC)':<19} | {'Chat ID':<10} | {'Статус':<6} | {'Деф.':<4} | {'Токени':<6} | {'Вартість $':<10} | {'Приміщення'}"
+    header = (
+        f"{Style.BOLD}{Style.WHITE}"
+        f"{'ID':<4} | {'Час (UTC)':<19} | {'Chat ID':<10} | {'Статус':<6} | {'Деф.':<4} | {'Токени':<6} | {'Вартість $':<10} | {'Приміщення'}"
+        f"{Style.RESET}"
+    )
     lines.append(header)
-    lines.append("-" * 110)
+    lines.append(sub_sep)
 
     for row in logs:
+        raw_status = row["status"]
+        if raw_status == "PASSED":
+            status_col = f"{Style.BOLD}{Style.GREEN}{'PASSED':<6}{Style.RESET}"
+        else:
+            status_col = f"{Style.BOLD}{Style.RED}{'FAILED':<6}{Style.RESET}"
+
         lines.append(
-            f"{row['log_id']:<4} | "
-            f"{str(row['timestamp']):<19} | "
-            f"{row['chat_id']:<10} | "
-            f"{row['status']:<6} | "
+            f"{Style.BOLD}{row['log_id']:<4}{Style.RESET} | "
+            f"{Style.GRAY}{str(row['timestamp']):<19}{Style.RESET} | "
+            f"{Style.CYAN}{row['chat_id']:<10}{Style.RESET} | "
+            f"{status_col} | "
             f"{row['defects_count']:<4} | "
-            f"{row['tokens_total']:<6} | "
-            f"${row['estimated_cost_usd']:<9.6f} | "
-            f"{row['room_name']}"
+            f"{Style.CYAN}{row['tokens_total']:<6}{Style.RESET} | "
+            f"{Style.YELLOW}${row['estimated_cost_usd']:<9.6f}{Style.RESET} | "
+            f"{Style.BOLD}{Style.WHITE}{row['room_name']}{Style.RESET}"
         )
         if row.get("summary"):
             short_sum = row["summary"] if len(row["summary"]) <= 95 else row["summary"][:92] + "..."
-            lines.append(f"     └─ Підсумок: {short_sum}")
+            lines.append(f"     {Style.GRAY}└─ Підсумок: {short_sum}{Style.RESET}")
 
-    lines.append("=" * 110)
+    lines.append(sep)
     return "\n".join(lines)
 

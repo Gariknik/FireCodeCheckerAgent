@@ -5,6 +5,7 @@ import json
 from typing import Optional
 
 from src.agent import FireCodeCheckerAgent
+from src.console_style import Style, colorize_react_block
 from src.database import (
     init_db,
     fetch_recent_logs,
@@ -73,12 +74,12 @@ def run_demo_scenarios() -> None:
     ]
 
     for chat_id, msg, title in scenarios:
-        print("=" * 85)
-        print(f"▶ {title}")
-        print("=" * 85)
+        print(f"{Style.BOLD}{Style.BLUE}{'=' * 95}{Style.RESET}")
+        print(f"{Style.BG_BLUE} ▶ {title} {Style.RESET}")
+        print(f"{Style.BOLD}{Style.BLUE}{'=' * 95}{Style.RESET}")
         res = agent.run_react_inspection(chat_id=chat_id, message_text=msg)
-        print("\n--- ReAct Trace ---")
-        print(res["react_trace"])
+        print(f"\n{Style.BOLD}{Style.MAGENTA}─── ReAct Trace ───{Style.RESET}")
+        print(colorize_react_block(res["react_trace"]))
 
         if res["success"]:
             print("\n--- Telegram Output (Pydantic FireSafetyReportOutput) ---")
