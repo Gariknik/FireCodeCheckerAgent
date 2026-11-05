@@ -4,15 +4,21 @@ import unittest
 from unittest.mock import patch
 from pydantic import ValidationError
 
-from schemas import BuildingRoomInput, DefectItem, FireSafetyReportOutput
-from tools import (
+from src.schemas import BuildingRoomInput, DefectItem, FireSafetyReportOutput
+from src.tools import (
     search_fire_code_web,
     send_telegram_report,
     log_inspection_result,
     _is_whitelisted_url,
 )
-from agent import FireCodeCheckerAgent
-from database import init_db, insert_inspection_log, fetch_recent_logs
+from src.agent import FireCodeCheckerAgent
+from src.database import (
+    init_db,
+    insert_inspection_log,
+    fetch_recent_logs,
+    fetch_db_summary_stats,
+    format_logs_for_console,
+)
 
 
 class TestFireCodeCheckerAgent(unittest.TestCase):
@@ -26,13 +32,12 @@ class TestFireCodeCheckerAgent(unittest.TestCase):
         self.env_patcher.stop()
 
     # -------------------------------------------------------------------------
-    # 1. Тести Pydantic-схем (schemas.py)
+    # 1. Тести Pydantic-схем (src/schemas.py)
     # -------------------------------------------------------------------------
     def test_building_room_input_validation_and_optional_category(self) -> None:
-        # Повна валідна модель з категорією
         valid = BuildingRoomInput(
             room_name="Складський комплекс",
-            category="в",  # перевірка автоматичної нормалізації у верхній регістр 'В'
+            category="в",
             area_sqm=250.0,
             height_m=3.0,
             occupancy=15,
@@ -46,29 +51,23 @@ class TestFireCodeCheckerAgent(unittest.TestCase):
         self.assertEqual(valid.category, "В")
         self.assertEqual(valid.occupancy, 15)
 
-        # Необов'язкова категорія (category=None)
         no_cat = BuildingRoomInput(room_name="Офіс 302", area_sqm=40.0, occupancy=20)
         self.assertIsNone(no_cat.category)
         self.assertEqual(no_cat.occupancy, 20)
 
-        # Латинська літера категорії ('A' -> 'А')
         latin_cat = BuildingRoomInput(room_name="Цех", category="A", area_sqm=50.0)
         self.assertEqual(latin_cat.category, "А")
 
-        # Некоректна площа (<= 0)
         with self.assertRaises(ValidationError):
             BuildingRoomInput(room_name="Тест", category="В", area_sqm=-10.0)
 
-        # Некоректна категорія
         with self.assertRaises(ValidationError):
             BuildingRoomInput(room_name="Тест", category="Ж", area_sqm=50.0)
 
-        # Від'ємна кількість людей
         with self.assertRaises(ValidationError):
             BuildingRoomInput(room_name="Тест", area_sqm=50.0, occupancy=-5)
 
     def test_fire_safety_report_output_formatting_and_markdown_escape(self) -> None:
-        # PASSED шаблон з підкресленнями в URL
         passed_report = FireSafetyReportOutput(
             room_name="Серверна",
             status="PASSED",
@@ -82,7 +81,6 @@ class TestFireCodeCheckerAgent(unittest.TestCase):
         self.assertIn("ВІДПОВІДАЄ НОРМАМ", msg_passed)
         self.assertIn(r"dbn\_v\_1\_1\_7\_2016", msg_passed)
 
-        # FAILED шаблон
         failed_report = FireSafetyReportOutput(
             room_name="Склад",
             status="FAILED",
@@ -105,10 +103,9 @@ class TestFireCodeCheckerAgent(unittest.TestCase):
         self.assertIn(r"id\_doc=66189", msg_failed)
 
     # -------------------------------------------------------------------------
-    # 2. Тести парсера природної мови (extract_room_input у agent.py)
+    # 2. Тести парсера природної мови (extract_room_input у src/agent.py)
     # -------------------------------------------------------------------------
     def test_extract_room_input_all_parameters_and_variants(self) -> None:
-        # Варіант 1: повний текст із компактним розміром дверей та кількістю людей в приміщенні
         text1 = (
             "Перевірити приміщення: Конференц-зал, площа 85,5 кв.м, "
             "кількість людей в приміщенні — 55, висота стелі 3,2м, "
@@ -127,7 +124,6 @@ class TestFireCodeCheckerAgent(unittest.TestCase):
         self.assertEqual(room1.wall_finish, "Г1")
         self.assertEqual(room1.evac_distance_m, 18.0)
 
-        # Варіант 2: альтернативні формулювання ("40 осіб", "виходів: 1", "всередину", "ширина дверей", "висота дверей")
         text2 = (
             "Об'єкт: Цех пакування, категорія Б, площа 150 м2, 40 осіб, "
             "виходів: 1, ширина дверей 0.75м, висота дверей 1.9м, всередину, Г2"
@@ -143,20 +139,17 @@ class TestFireCodeCheckerAgent(unittest.TestCase):
         self.assertEqual(room2.wall_finish, "Г2")
 
     # -------------------------------------------------------------------------
-    # 3. Тести інструментів та білого списку джерел (tools.py)
+    # 3. Тести інструментів та білого списку джерел (src/tools.py)
     # -------------------------------------------------------------------------
     def test_search_fire_code_web_whitelist_and_rephrasing(self) -> None:
-        # Перевірка білого списку доменів (Контроль РИЗИКУ 2)
         self.assertTrue(_is_whitelisted_url("https://e-construction.gov.ua/dbn"))
         self.assertTrue(_is_whitelisted_url("https://online.budstandart.com/doc"))
         self.assertTrue(_is_whitelisted_url("https://dbn.co.ua/load"))
         self.assertFalse(_is_whitelisted_url("https://fake-fire-norms.com/dbn"))
 
-        # Перший (неточний) запит повертає порожній список []
         res_empty = search_fire_code_web("ДБН В.1.1-7:2016 макс відстань евакуаційного шляху категорія В")
         self.assertEqual(res_empty, [])
 
-        # Уточнений запит повертає п. 7.2.5 з білого списку
         res_found = search_fire_code_web("ДБН В.1.1-7:2016 гранична відстань евакуації категорія В")
         self.assertTrue(len(res_found) >= 1)
         self.assertTrue(any("7.2.5" in r["dbn_code"] for r in res_found))
@@ -167,19 +160,16 @@ class TestFireCodeCheckerAgent(unittest.TestCase):
     # 4. Тести всіх нормативних правил ДБН В.1.1-7:2016 (evaluate_compliance)
     # -------------------------------------------------------------------------
     def test_evaluate_compliance_evacuation_distances_by_category(self) -> None:
-        # Категорія А (макс 15м): 20м -> FAILED (п. 7.2.4)
         r_a = BuildingRoomInput(room_name="Цех А", category="А", area_sqm=50.0, evac_distance_m=20.0)
         rep_a, _, _ = self.agent.evaluate_compliance(r_a, [])
         self.assertEqual(rep_a.status, "FAILED")
         self.assertIn("7.2.4", rep_a.defects[0].dbn_code)
 
-        # Категорія В (макс 25м): 35м -> FAILED (п. 7.2.5)
         r_v = BuildingRoomInput(room_name="Склад В", category="В", area_sqm=100.0, evac_distance_m=35.0)
         rep_v, _, _ = self.agent.evaluate_compliance(r_v, [])
         self.assertEqual(rep_v.status, "FAILED")
         self.assertIn("7.2.5", rep_v.defects[0].dbn_code)
 
-        # Категорія Д (макс 50м): 40м -> PASSED, 60м -> FAILED (п. 7.2.6)
         r_d_ok = BuildingRoomInput(room_name="Цех Д", category="Д", area_sqm=100.0, evac_distance_m=40.0)
         rep_d_ok, _, _ = self.agent.evaluate_compliance(r_d_ok, [])
         self.assertEqual(rep_d_ok.status, "PASSED")
@@ -190,14 +180,6 @@ class TestFireCodeCheckerAgent(unittest.TestCase):
         self.assertIn("7.2.6", rep_d_fail.defects[0].dbn_code)
 
     def test_evaluate_compliance_occupancy_doors_walls_and_height(self) -> None:
-        # Комплексна перевірка усіх дефектів:
-        # - щільність людей: 60 осіб на 60 м² = 1.0 м²/особу (< 1.5 м² -> п. 7.2.1)
-        # - кількість виходів: 1 вихід при 60 особах (> 50 осіб -> п. 7.2.2)
-        # - ширина дверей: 0.9м при 60 особах (< 1.2м для >50 осіб -> п. 7.2.8)
-        # - висота дверей: 1.85м (< 2.0м -> п. 7.2.8)
-        # - напрямок дверей: всередину при 60 особах (-> п. 7.2.10)
-        # - висота стелі: 1.9м (< 2.0м -> п. 7.3.1)
-        # - оздоблення стін: Г3 (-> п. 7.3.3)
         room = BuildingRoomInput(
             room_name="Зал засідань",
             category=None,
@@ -222,15 +204,15 @@ class TestFireCodeCheckerAgent(unittest.TestCase):
         self.assertIn("ДБН В.1.1-7:2016 п. 7.3.3", codes)
 
     # -------------------------------------------------------------------------
-    # 5. Тести SQLite БД (database.py) та повного циклу ReAct (run_react_inspection)
+    # 5. Тести SQLite БД, фільтрації та консольного виводу логів (src/database.py)
     # -------------------------------------------------------------------------
-    def test_sqlite_database_logging(self) -> None:
+    def test_sqlite_database_logging_filtering_and_console_formatting(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             temp_db = os.path.join(tmpdir, "test_building.db")
             init_db(temp_db)
-            res = insert_inspection_log(
-                chat_id=111222,
-                room_name="Тестова кімната",
+            insert_inspection_log(
+                chat_id=111,
+                room_name="Кімната 1",
                 status="PASSED",
                 defects_count=0,
                 summary="ОК",
@@ -240,16 +222,45 @@ class TestFireCodeCheckerAgent(unittest.TestCase):
                 estimated_cost_usd=0.0002,
                 db_path=temp_db,
             )
-            self.assertEqual(res["status"], "SUCCESS")
-            self.assertEqual(res["log_id"], 1)
+            insert_inspection_log(
+                chat_id=222,
+                room_name="Кімната 2",
+                status="FAILED",
+                defects_count=2,
+                summary="Порушення п. 7.2.5",
+                model_used="openai/gpt-4o-mini",
+                tokens_prompt=800,
+                tokens_completion=200,
+                estimated_cost_usd=0.0004,
+                db_path=temp_db,
+            )
 
-            logs = fetch_recent_logs(limit=5, db_path=temp_db)
-            self.assertEqual(len(logs), 1)
-            self.assertEqual(logs[0]["tokens_total"], 600)
-            self.assertEqual(logs[0]["room_name"], "Тестова кімната")
+            # Перевірка фільтрації за статусом та chat_id
+            failed_only = fetch_recent_logs(limit=10, status_filter="FAILED", db_path=temp_db)
+            self.assertEqual(len(failed_only), 1)
+            self.assertEqual(failed_only[0]["room_name"], "Кімната 2")
+
+            chat_111 = fetch_recent_logs(limit=10, chat_id_filter=111, db_path=temp_db)
+            self.assertEqual(len(chat_111), 1)
+            self.assertEqual(chat_111[0]["status"], "PASSED")
+
+            # Перевірка статистики та консольного форматування
+            stats = fetch_db_summary_stats(db_path=temp_db)
+            self.assertEqual(stats["total_inspections"], 2)
+            self.assertEqual(stats["passed_count"], 1)
+            self.assertEqual(stats["failed_count"], 1)
+            self.assertEqual(stats["total_tokens"], 1600)
+
+            all_logs = fetch_recent_logs(limit=10, db_path=temp_db)
+            console_table = format_logs_for_console(all_logs, stats=stats, as_json=False)
+            self.assertIn("ЖУРНАЛ ПЕРЕВІРОК З БАЗИ ДАНИХ SQLite", console_table)
+            self.assertIn("Кімната 1", console_table)
+            self.assertIn("Кімната 2", console_table)
+
+            console_json = format_logs_for_console(all_logs, stats=stats, as_json=True)
+            self.assertIn('"total_inspections": 2', console_json)
 
     def test_full_react_inspection_passed_failed_and_validation_error(self) -> None:
-        # 1. FAILED сценарій
         msg_fail = (
             "Перевірити приміщення: Складський комплекс, площа 250 кв.м, категорія В, "
             "оздоблення стін — гіпсокартон Г1, відстань до виходу — 35м."
@@ -260,7 +271,6 @@ class TestFireCodeCheckerAgent(unittest.TestCase):
         self.assertEqual(res_fail["report"]["defects_count"], 1)
         self.assertEqual(res_fail["db_log"]["status"], "SUCCESS")
 
-        # 2. PASSED сценарій без категорії з кількістю людей
         msg_pass = (
             "Перевірити приміщення: Офіс 302, площа 60 кв.м, кількість людей в приміщенні — 20 осіб, "
             "оздоблення стін — Г1, відстань до виходу — 15м, двері 0.9х2.1м, назовні."
@@ -270,7 +280,6 @@ class TestFireCodeCheckerAgent(unittest.TestCase):
         self.assertEqual(res_pass["report"]["status"], "PASSED")
         self.assertEqual(res_pass["report"]["defects_count"], 0)
 
-        # 3. ValidationError сценарій (Контроль РИЗИКУ 1)
         msg_invalid = "Перевірити приміщення без площі"
         res_err = self.agent.run_react_inspection(chat_id=987654323, message_text=msg_invalid)
         self.assertFalse(res_err["success"])

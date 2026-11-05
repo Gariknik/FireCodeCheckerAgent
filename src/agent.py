@@ -1,12 +1,12 @@
 import json
 import os
 import re
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple
 from dotenv import load_dotenv
 from pydantic import ValidationError
 
-from schemas import BuildingRoomInput, DefectItem, FireSafetyReportOutput
-from tools import search_fire_code_web, send_telegram_report, log_inspection_result
+from src.schemas import BuildingRoomInput, DefectItem, FireSafetyReportOutput
+from src.tools import search_fire_code_web, send_telegram_report, log_inspection_result
 
 load_dotenv()
 
@@ -49,8 +49,6 @@ class FireCodeCheckerAgent:
         Крок 1: Парсинг Telegram-тексту у Pydantic-модель BuildingRoomInput
         (Модель: gemini-3.5-flash-lite).
         """
-        # Якщо налаштований реальний ключ Gemini або OpenRouter, можна викликати LLM;
-        # також підтримується детермінований екстрактор для миттєвої роботи без зовнішніх ключів.
         extracted: Dict[str, Any] = {}
 
         # Назва приміщення
@@ -555,4 +553,3 @@ class FireCodeCheckerAgent:
             },
             "react_trace": "\n".join(trace_lines),
         }
-

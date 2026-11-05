@@ -1,17 +1,40 @@
+import argparse
+import os
 import sys
 import json
-from agent import FireCodeCheckerAgent
-from database import init_db, fetch_recent_logs
+from typing import Optional
+
+from src.agent import FireCodeCheckerAgent
+from src.database import (
+    init_db,
+    fetch_recent_logs,
+    fetch_db_summary_stats,
+    format_logs_for_console,
+)
 
 # Налаштування UTF-8 для консолі Windows
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 
+def show_logs_in_console(
+    limit: int = 10,
+    status_filter: Optional[str] = None,
+    chat_id_filter: Optional[int] = None,
+    as_json: bool = False,
+) -> None:
+    """Отримує та виводить логи перевірок із БД SQLite у консоль."""
+    logs = fetch_recent_logs(
+        limit=limit,
+        status_filter=status_filter,
+        chat_id_filter=chat_id_filter,
+    )
+    stats = fetch_db_summary_stats()
+    print(format_logs_for_console(logs=logs, stats=stats, as_json=as_json))
+
+
 def run_demo_scenarios() -> None:
-    # У локальному CLI-демо режимі вимикаємо реальну відправку на тестові chat_id (987654321..),
-    # щоб не робити зайвих мережевих викликів до Telegram API
-    import os
+    """Запускає набір із 6 демонстраційних сценаріїв перевірки ДБН В.1.1-7:2016."""
     os.environ["TELEGRAM_BOT_TOKEN"] = "YOUR_BOT_TOKEN"
     init_db()
     agent = FireCodeCheckerAgent()
@@ -67,16 +90,60 @@ def run_demo_scenarios() -> None:
             print(res["error"])
         print()
 
-    print("=" * 85)
-    print("📊 Вміст таблиці inspection_logs у SQLite (building_project.db):")
-    print("=" * 85)
-    logs = fetch_recent_logs(limit=6)
-    print(json.dumps(logs, ensure_ascii=False, indent=2))
+    show_logs_in_console(limit=6)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="FireCodeCheckerAgent — інженерний AI-агент аудиту норм ДБН В.1.1-7:2016"
+    )
+    parser.add_argument(
+        "--bot",
+        action="store_true",
+        help="Запустити Telegram-бота у режимі polling",
+    )
+    parser.add_argument(
+        "--logs",
+        action="store_true",
+        help="Вивести у консоль журнал перевірок та статистику з бази даних SQLite",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=15,
+        help="Кількість останніх записів для виводу з БД (за замовчуванням: 15)",
+    )
+    parser.add_argument(
+        "--status",
+        choices=["PASSED", "FAILED", "passed", "failed"],
+        default=None,
+        help="Фільтр логів за статусом перевірки (PASSED або FAILED)",
+    )
+    parser.add_argument(
+        "--chat-id",
+        type=int,
+        default=None,
+        help="Фільтр логів за конкретним Telegram chat_id",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Вивести логи з БД у форматі JSON замість таблиці",
+    )
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    if "--bot" in sys.argv:
-        from bot import run_telegram_bot
+    args = parse_args()
+    if args.bot:
+        from src.bot import run_telegram_bot
         run_telegram_bot()
+    elif args.logs:
+        show_logs_in_console(
+            limit=args.limit,
+            status_filter=args.status,
+            chat_id_filter=args.chat_id,
+            as_json=args.json,
+        )
     else:
         run_demo_scenarios()

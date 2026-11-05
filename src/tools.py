@@ -5,8 +5,8 @@ from urllib.parse import urlparse
 import requests
 from dotenv import load_dotenv
 
-from schemas import FireSafetyReportOutput
-from database import insert_inspection_log
+from src.schemas import FireSafetyReportOutput
+from src.database import insert_inspection_log
 
 load_dotenv()
 
@@ -217,4 +217,3 @@ def log_inspection_result(
         tokens_completion=tokens_completion,
         estimated_cost_usd=estimated_cost_usd,
     )
-
